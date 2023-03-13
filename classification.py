@@ -161,10 +161,10 @@ def train(mymodel, num_epochs, train_dataloader, validation_dataloader, test_dat
 
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
-            labels = batch['labels']
+            labels = batch['labels'].to(device)
 
             output = mymodel(input_ids=input_ids, attention_mask=attention_mask)
-            predictions = output.logits.cpu()
+            predictions = output.logits.float()
             model_loss = loss(predictions, labels)
             model_loss.backward()
             optimizer.step()
@@ -302,6 +302,10 @@ if __name__ == "__main__":
                                                                                              args.device,
                                                                                              args.small_subset)
 
+    num_epochs = args.num_epochs
+    device = args.device
+    lr = args.lr    
+        
     print(" >>>>>>>>  Starting training ... ")
     train(pretrained_model, args.num_epochs, train_dataloader, validation_dataloader, test_dataloader, args.device, args.lr, args.output)
 
