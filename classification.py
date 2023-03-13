@@ -1,3 +1,5 @@
+import numpy as np
+import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
@@ -101,7 +103,7 @@ def evaluate_model(model, dataloader, device):
     return dev_accuracy.compute()
 
 
-def train(mymodel, num_epochs, train_dataloader, validation_dataloader, device, lr):
+def train(mymodel, num_epochs, train_dataloader, validation_dataloader, test_dataloader, device, lr, output):
     """ Train a PyTorch Module
     :param torch.nn.Module mymodel: the model to be trained
     :param int num_epochs: number of epochs to train for
@@ -126,6 +128,10 @@ def train(mymodel, num_epochs, train_dataloader, validation_dataloader, device, 
     )
 
     loss = torch.nn.CrossEntropyLoss()
+
+    # For visualization
+    A_train = 0
+    A_dev = 0
 
     for epoch in range(num_epochs):
 
@@ -158,26 +164,58 @@ def train(mymodel, num_epochs, train_dataloader, validation_dataloader, device, 
             labels = batch['labels']
 
             output = mymodel(input_ids=input_ids, attention_mask=attention_mask)
-            predictions = output.logits
-            model_loss = loss(labels, predictions)
+            predictions = output.logits.cpu()
+            model_loss = loss(predictions, labels)
             model_loss.backward()
+            optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
+
             predictions = torch.argmax(predictions, dim=1)
 
             # update metrics
             train_accuracy.add_batch(predictions=predictions, references=batch['labels'])
 
+        #train_accuracy_dict = evaluate_model(mymodel, train_dataloader, device)
+        #train_acc_dict = train_accuracy.compute()
+
+
         # print evaluation metrics
+        train_acc =  train_accuracy.compute() 
         print(f" ===> Epoch {epoch + 1}")
-        print(f" - Average training metrics: accuracy={train_accuracy.compute()}")
+        print(f" - Average training metrics: accuracy={train_acc['accuracy']}")
+        if epoch == 0:
+          A_train = train_acc['accuracy']
+        else: 
+          A_train = np.append(A_train, train_acc['accuracy'])
 
         # normally, validation would be more useful when training for many epochs
         val_accuracy = evaluate_model(mymodel, validation_dataloader, device)
-        print(f" - Average validation metrics: accuracy={val_accuracy}")
+        print(f" - Average validation metrics: accuracy={val_accuracy['accuracy']}")
+        if epoch == 0:
+            A_dev = val_accuracy['accuracy']
+        else:
+            A_dev = np.append(A_dev, val_accuracy['accuracy'])
+
+        test_accuracy = evaluate_model(mymodel, test_dataloader, args.device)
+        print(f" - Average test metrics: accuracy={test_accuracy['accuracy']}")
+
+    # Visualization
+    fig0=plt.figure(0)
+    plt.plot(A_train,'-')
+    plt.xlabel('Iteration', fontsize=18)
+    plt.ylabel('Train Accuracy', fontsize=16)
+    plt.savefig('none')
+
+    fig0=plt.figure(0)
+    plt.plot(A_dev,'-')
+    plt.xlabel('Iteration', fontsize=18)
+    plt.ylabel('Dev Accuracy', fontsize=16)
+    plt.savefig('none')
 
 
-def pre_process(model_name, batch_size, device, small_subset=False):
+
+def pre_process(model_name, batch_size, device, small_subset=True):
     # download dataset
     print("Loading the dataset ...")
     dataset = load_dataset("boolq")
@@ -192,6 +230,7 @@ def pre_process(model_name, batch_size, device, small_subset=False):
     else:
         # since the dataset does not come with any validation data,
         # split the training data into "train" and "dev"
+        print("Using all data")
         dataset_train_subset = dataset['train'][:8000]
         dataset_dev_subset = dataset['validation']
         dataset_test_subset = dataset['train'][8000:]
@@ -246,14 +285,17 @@ if __name__ == "__main__":
     parser.add_argument("--experiment", type=str, default=None)
     parser.add_argument("--small_subset", type=bool, default=False)
     parser.add_argument("--num_epochs", type=int, default=1)
-    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--model", type=str, default="distilbert-base-uncased")
+    parser.add_argument("--model", dest='model', type=str, default="distilbert-base-uncased")
+    parser.add_argument("--output", type=str, default="test.png")
 
-    # Am getting register_bugger erorr
+
+    #model = "distilbert-base-uncased"
     args = parser.parse_args()
     print(f"Specified arguments: {args}")
+
     # load the data and models
     pretrained_model, train_dataloader, validation_dataloader, test_dataloader = pre_process(args.model,
                                                                                              args.batch_size,
@@ -261,13 +303,13 @@ if __name__ == "__main__":
                                                                                              args.small_subset)
 
     print(" >>>>>>>>  Starting training ... ")
-    train(pretrained_model, num_epochs, train_dataloader, validation_dataloader, device, lr)
+    train(pretrained_model, args.num_epochs, train_dataloader, validation_dataloader, test_dataloader, args.device, args.lr, args.output)
 
     # print the GPU memory usage just to make sure things are alright
     print_gpu_memory()
 
-    val_accuracy = evaluate_model(pretrained_model, validation_dataloader, device)
+    val_accuracy = evaluate_model(pretrained_model, validation_dataloader, args.device)
     print(f" - Average DEV metrics: accuracy={val_accuracy}")
 
-    test_accuracy = evaluate_model(pretrained_model, test_dataloader, device)
+    test_accuracy = evaluate_model(pretrained_model, test_dataloader, args.device)
     print(f" - Average TEST metrics: accuracy={test_accuracy}")
